@@ -1,0 +1,7 @@
+PlayerAvatar
+├── PhotonView                    ← Observed Components: PlayerAvatarSync
+├── PlayerAvatarSync.cs
+├── HeadVisual                    ← simple sphere, scale 0.2
+│   └── MeshRenderer
+├── LeftHandVisual                ← small cube
+└── RightHandVisual               ← small cube

@@ -1,0 +1,8 @@
+SharedObject
+├── PhotonView                    ← Observed Components: NetworkedSharedObject
+│                                    Observe Option: Unreliable On Change
+├── NetworkedSharedObject.cs
+├── Rigidbody                     ← isKinematic: true, useGravity: false
+├── Collider                      ← for grab detection
+└── MeshRenderer                  ← your 3D model goes here
+    └── (any mesh — cube, glTF import, etc.)

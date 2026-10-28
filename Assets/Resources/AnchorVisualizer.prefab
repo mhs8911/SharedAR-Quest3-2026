@@ -1,0 +1,3 @@
+AnchorVisualizer
+├── MeshRenderer                  ← small axis-cross or diamond shape
+└── (optional) TextMeshPro        ← shows "Anchor" label in world space
