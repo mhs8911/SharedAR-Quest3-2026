@@ -1,0 +1,24 @@
+SharedARMain [Scene Root]
+│
+├── OVRCameraRig                      ← drag from Meta XR Core SDK samples
+│   ├── TrackingSpace                 ← TAG THIS: "TrackingSpace"
+│   │   ├── LeftHandAnchor
+│   │   ├── RightHandAnchor
+│   │   └── CenterEyeAnchor
+│   ├── OVRPassthroughLayer           ← add component
+│   └── PassthroughController.cs     ← add component
+│
+├── OVRManager                        ← drag from prefabs, enable Insight Passthrough
+│
+├── _AnchorSystem
+│   └── SharedAnchorManager.cs       ← assign ovrCameraRigTrackingSpace in Inspector
+│
+├── _Spawner
+│   ├── SharedObjectSpawner.cs
+│   └── SpawnTrigger.cs
+│
+├── DebugCanvas [World Space]
+│   └── DebugStatusUI.cs
+│
+└── Lighting
+    └── Directional Light            ← keep dim; passthrough provides real-world light

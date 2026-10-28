@@ -1,0 +1,6 @@
+Bootstrap [Scene Root]
+└── _Managers
+    ├── OculusPlatformInit.cs         ← runs first, DontDestroyOnLoad
+    ├── SharedARNetworkManager.cs     ← DontDestroyOnLoad
+    ├── TrackingSpaceAligner.cs
+    └── ARSceneBootstrapper.cs        ← triggers scene load after init

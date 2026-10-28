@@ -47,5 +47,19 @@
     "com.unity.modules.video": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0"
-  }
+    "com.meta.xr.sdk.core": "65.0.0",
+    "com.meta.xr.sdk.interaction": "65.0.0",
+    "com.unity.xr.openxr": "1.10.0",
+    "com.unity.xr.management": "4.4.0",
+    "com.unity.inputsystem": "1.7.0",
+    "com.unity.textmeshpro": "3.0.6",
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "scopedRegistries": [
+    {
+      "name": "Meta XR",
+      "url": "https://npm.developer.oculus.com",
+      "scopes": ["com.meta.xr"]
+    }
+  ]
 }
