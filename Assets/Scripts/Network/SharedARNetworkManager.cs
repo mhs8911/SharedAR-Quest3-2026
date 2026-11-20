@@ -1,102 +1,163 @@
-// Scripts/Network/SharedARNetworkManager.cs
-// Role: Connects both headsets to Photon, manages room state,
-//       and relays the shared anchor UUID between players.
-
-using System;
-using ExitGames.Client.Photon;
-using Photon.Pun;
-using Photon.Realtime;
+// ============================================================================
+// Mariam code addition
+// File: Scripts/Network/SharedARNetworkManager.cs
+// Changes from your version:
+//  [CHANGED] No longer a NetworkBehaviour. It had NetworkVariables but was not on a
+//            spawned NetworkObject, so they could not sync. It is now a plain
+//            MonoBehaviour that starts and stops the connection.
+//  [REMOVED] anchorPosition / anchorRotation NetworkVariables, SetAnchorReady,
+//            RPC_BroadcastAnchor (it did not end in "Rpc", so it will not compile in
+//            NGO 2.x), IsAnchorReady. Each headset detects the QR code itself, and
+//            sharing a world-space anchor between devices would be wrong.
+//  [REMOVED] DontDestroyOnLoad: it would break the AlignmentManager reference
+//            when the scene reloads. NetworkManager itself persists (put it in Bootstrap).
+//  [KEPT]    StartAsHost(), StartAsClient(string), Instance, address/port fields.
+//  [ADDED]   alignment gate, host listen on 0.0.0.0, local IP display, controller
+//            shortcuts (X = host, Y = join), Shutdown(), StatusMessage.
+// ============================================================================
+using System.Net;
+using System.Net.Sockets;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 
-public class SharedARNetworkManager : MonoBehaviourPunCallbacks
+public class SharedARNetworkManager : MonoBehaviour
 {
     public static SharedARNetworkManager Instance { get; private set; }
 
-    [Header("Room Config")]
-    [SerializeField] private string roomName = "SharedARRoom";
-    [SerializeField] private byte maxPlayers = 2;
+    //change to host's IP when client is on different device.
+    [SerializeField] private string connectionAddress = "127.0.0.1";
+    [SerializeField] private ushort connectionPort = 7777;
 
-    // Key used to broadcast the host's shared anchor UUID through room properties
-    private const string ANCHOR_UUID_PROP = "AnchorUUID";
+    // [ADDED]
+    [SerializeField] private AlignmentManager alignmentManager;
+    [SerializeField] private bool requireAlignmentBeforeConnect = true;
+    [SerializeField] private bool enableControllerShortcuts = true;   // X = host, Y = join
 
-    // Events other systems subscribe to
-    public Action OnBothPlayersReady;
-    public Action<string> OnAnchorUUIDBroadcast; // fires on non-host when UUID arrives
+    public string StatusMessage { get; private set; } = "Idle";
+    public string LocalIp { get; private set; } = "unknown";
 
-    public bool IsHost => PhotonNetwork.IsMasterClient;
+    public bool CanConnect =>
+        !requireAlignmentBeforeConnect
+        || (alignmentManager != null && alignmentManager.IsAligned);
 
     private void Awake()
     {
-        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
         Instance = this;
-        DontDestroyOnLoad(gameObject);
+        // [REMOVED] DontDestroyOnLoad(gameObject);
     }
 
     private void Start()
     {
-        PhotonNetwork.AutomaticallySyncScene = true;
-        Debug.Log("[Network] Connecting to Photon...");
-        PhotonNetwork.ConnectUsingSettings();
-    }
+        LocalIp = GetLocalIPv4();
 
-    // ── Photon Callbacks ─────────────────────────────────────────────────────
-
-    public override void OnConnectedToMaster()
-    {
-        Debug.Log("[Network] Connected. Joining or creating room...");
-        var options = new RoomOptions
+        if (NetworkManager.Singleton != null)
         {
-            MaxPlayers    = maxPlayers,
-            IsVisible     = true,
-            IsOpen        = true,
-            CustomRoomProperties           = new Hashtable { { ANCHOR_UUID_PROP, "" } },
-            CustomRoomPropertiesForLobby   = new[] { ANCHOR_UUID_PROP }
-        };
-        PhotonNetwork.JoinOrCreateRoom(roomName, options, TypedLobby.Default);
-    }
-
-    public override void OnJoinedRoom()
-    {
-        Debug.Log($"[Network] In room. IsMaster={IsHost} | Players={PhotonNetwork.CurrentRoom.PlayerCount}");
-
-        // Spawn our networked avatar immediately
-        PhotonNetwork.Instantiate("PlayerAvatar", Vector3.zero, Quaternion.identity);
-
-        if (PhotonNetwork.CurrentRoom.PlayerCount == maxPlayers)
-            OnBothPlayersReady?.Invoke();
-    }
-
-    public override void OnPlayerEnteredRoom(Player newPlayer)
-    {
-        Debug.Log($"[Network] Player joined → total: {PhotonNetwork.CurrentRoom.PlayerCount}");
-        if (PhotonNetwork.CurrentRoom.PlayerCount == maxPlayers)
-            OnBothPlayersReady?.Invoke();
-    }
-
-    public override void OnRoomPropertiesUpdate(Hashtable changed)
-    {
-        // Non-host receives the anchor UUID here and triggers the load
-        if (!IsHost && changed.ContainsKey(ANCHOR_UUID_PROP))
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;   // [ADDED]
+            NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+        }
+        else
         {
-            string uuid = changed[ANCHOR_UUID_PROP].ToString();
-            if (!string.IsNullOrEmpty(uuid))
-            {
-                Debug.Log($"[Network] Received anchor UUID from host: {uuid}");
-                OnAnchorUUIDBroadcast?.Invoke(uuid);
-            }
+            StatusMessage = "No NetworkManager in scene (put it in Bootstrap)";
         }
     }
 
-    // ── Public API ───────────────────────────────────────────────────────────
-
-    /// <summary>Host calls this after saving anchor to cloud.</summary>
-    public void BroadcastAnchorUUID(string uuid)
+    private void Update()
     {
-        var props = new Hashtable { { ANCHOR_UUID_PROP, uuid } };
-        PhotonNetwork.CurrentRoom.SetCustomProperties(props);
-        Debug.Log($"[Network] Anchor UUID broadcasted: {uuid}");
+        if (!enableControllerShortcuts) return;
+        if (NetworkManager.Singleton == null || NetworkManager.Singleton.IsListening) return;
+
+        if (OVRInput.GetDown(OVRInput.Button.Three)) StartAsHost();
+        if (OVRInput.GetDown(OVRInput.Button.Four)) StartAsClient(connectionAddress);
     }
 
-    public override void OnDisconnected(DisconnectCause cause)
-        => Debug.LogWarning($"[Network] Disconnected: {cause}");
+    public void StartAsHost()
+    {
+        if (NetworkManager.Singleton == null) return;
+        if (!CanConnect)
+        {
+            StatusMessage = "Scan the QR marker first";
+            Debug.LogWarning("[Net] Not aligned yet.");
+            return;
+        }
+
+        // [ADDED] listen on all interfaces so the other Quest can reach this one
+        NetworkManager.Singleton.GetComponent<UnityTransport>()
+            .SetConnectionData("127.0.0.1", connectionPort, "0.0.0.0");
+
+        NetworkManager.Singleton.StartHost();
+        StatusMessage = $"Hosting on {LocalIp}:{connectionPort}";
+        Debug.Log("Started as Host");
+    }
+
+    public void StartAsClient(string serverAddress)
+    {
+        if (NetworkManager.Singleton == null) return;
+        if (!CanConnect)
+        {
+            StatusMessage = "Scan the QR marker first";
+            Debug.LogWarning("[Net] Not aligned yet.");
+            return;
+        }
+
+        connectionAddress = serverAddress;
+        NetworkManager.Singleton.GetComponent<UnityTransport>()
+            .SetConnectionData(serverAddress, connectionPort);
+        NetworkManager.Singleton.StartClient();
+        StatusMessage = $"Connecting to {serverAddress}...";
+        Debug.Log($"Connecting to {serverAddress}");
+    }
+
+    // [ADDED]
+    public void Shutdown()
+    {
+        if (NetworkManager.Singleton != null) NetworkManager.Singleton.Shutdown();
+        StatusMessage = "Idle";
+    }
+
+    private void OnServerStarted()
+    {
+        Debug.Log("Server started");   // [CHANGED] original: "waiting for anchor data"
+    }
+
+    private void OnClientConnected(ulong clientId)
+    {
+        Debug.Log($"Client {clientId} connected");
+        if (NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsHost)
+            StatusMessage = "Connected to host";
+    }
+
+    private void OnClientDisconnected(ulong clientId)
+    {
+        Debug.Log($"Client {clientId} disconnected");
+    }
+
+    private static string GetLocalIPv4()
+    {
+        try
+        {
+            using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);   // UDP connect: no packet is actually sent
+                return ((IPEndPoint)socket.LocalEndPoint).Address.ToString();
+            }
+        }
+        catch { return "unknown"; }
+    }
+
+    private void OnDestroy()
+    {
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+            NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+        }
+    }
 }

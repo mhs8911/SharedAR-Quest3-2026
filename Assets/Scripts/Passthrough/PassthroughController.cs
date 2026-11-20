@@ -1,8 +1,11 @@
-// Scripts/Passthrough/PassthroughController.cs
-// Role: Enables Meta Quest 3's color passthrough layer so the
-//       real world is visible through the headset (true AR mode).
-//       Attach to your OVRCameraRig GameObject.
-
+// ============================================================================
+// Mariam code addition
+// File: Scripts/Passthrough/PassthroughController.cs
+// ONE CHANGE: FindObjectOfType -> FindFirstObjectByType (obsolete in Unity 6).
+// Everything else is identical. If OVRManager.isInsightPassthroughEnabled shows an
+// obsolete warning in your Meta SDK version, enable passthrough on OVRManager in the
+// Inspector instead and delete that block.
+// ============================================================================
 using UnityEngine;
 
 [RequireComponent(typeof(OVRPassthroughLayer))]
@@ -12,9 +15,6 @@ public class PassthroughController : MonoBehaviour
     [SerializeField] private bool   startEnabled   = true;
     [SerializeField, Range(0f, 1f)]
     private float                   opacity         = 1f;
-    [SerializeField]
-    private OVRPassthroughLayer.ProjectionSurfaceType surfaceType
-        = OVRPassthroughLayer.ProjectionSurfaceType.Reconstructed;
 
     private OVRPassthroughLayer _passthroughLayer;
     private OVRManager          _ovrManager;
@@ -22,7 +22,8 @@ public class PassthroughController : MonoBehaviour
     private void Awake()
     {
         _passthroughLayer = GetComponent<OVRPassthroughLayer>();
-        _ovrManager       = FindObjectOfType<OVRManager>();
+        // [CHANGED] original: FindObjectOfType<OVRManager>();
+        _ovrManager       = FindFirstObjectByType<OVRManager>();
     }
 
     private void Start()
@@ -34,7 +35,6 @@ public class PassthroughController : MonoBehaviour
         }
 
         // Configure the passthrough layer
-        _passthroughLayer.projectionSurfaceType = surfaceType;
         _passthroughLayer.textureOpacity        = opacity;
         _passthroughLayer.hidden                = !startEnabled;
 
@@ -49,7 +49,7 @@ public class PassthroughController : MonoBehaviour
         Debug.Log("[Passthrough] AR passthrough layer active.");
     }
 
-    // ── Public API ───────────────────────────────────────────────────    
+    // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>Toggle passthrough on/off at runtime (e.g. for a VR/AR mode switch).</summary>
     public void SetPassthroughEnabled(bool enabled)
@@ -71,4 +71,3 @@ public class PassthroughController : MonoBehaviour
         _passthroughLayer.edgeColor = color;
     }
 }
-

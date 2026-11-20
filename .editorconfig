@@ -1,0 +1,4 @@
+root = true
+
+[*.cs]
+csharp_warn_cs0619 = silent

@@ -1,10 +1,19 @@
-// Scripts/DebugStatusUI.cs
-// Role: Renders a world-space status panel visible in-headset so
-//       you can see connection and alignment state during development.
-//       Attach to a Canvas set to World Space mode.
-
-using Photon.Pun;
+// ============================================================================
+// Mariam code addition
+// File: Scripts/Network/DebugStatusUI.cs
+// Changes from your version:
+//  [REMOVED] using Photon.Pun; PhotonNetwork.IsConnected / CurrentRoom.PlayerCount
+//  [REMOVED] SharedAnchorManager.Instance.OnAlignmentComplete (that script is deleted)
+//  [CHANGED] anchor line now reads AlignmentManager.IsAligned / IsLocked
+//  [CHANGED] network line reads NetworkManager state; host shows its IP so the
+//            client knows where to connect
+//  [CHANGED] player count = number of spawned NetworkedPlayerPose objects
+//            (works on host and client; ConnectedClients is server-only)
+//  [KEPT]    follow-the-head behaviour and all serialized fields
+//  [CHANGED] FindObjectOfType -> FindFirstObjectByType (Unity 6)
+// ============================================================================
 using TMPro;
+using Unity.Netcode;
 using UnityEngine;
 
 public class DebugStatusUI : MonoBehaviour
@@ -14,22 +23,24 @@ public class DebugStatusUI : MonoBehaviour
     [SerializeField] private TextMeshProUGUI playerCountText;
     [SerializeField] private Transform       followTarget; // assign centerEyeAnchor
 
+    [Header("References (auto-found if empty)")]
+    [SerializeField] private AlignmentManager alignmentManager;   // [ADDED]
+
     [Header("UI Follow Settings")]
     [SerializeField] private Vector3 offsetFromHead = new Vector3(0f, -0.3f, 1.0f);
     [SerializeField] private float   followSpeed    = 4f;
 
-    private bool _anchorAligned = false;
+    private int   playerCount;        // [ADDED]
+    private float nextCountTime;      // [ADDED]
 
     private void Start()
     {
-        SharedAnchorManager.Instance.OnAlignmentComplete += () =>
-        {
-            _anchorAligned = true;
-        };
+        if (alignmentManager == null)
+            alignmentManager = FindFirstObjectByType<AlignmentManager>();
 
         if (followTarget == null)
         {
-            var rig = FindObjectOfType<OVRCameraRig>();
+            var rig = FindFirstObjectByType<OVRCameraRig>();
             if (rig) followTarget = rig.centerEyeAnchor;
         }
     }
@@ -42,14 +53,38 @@ public class DebugStatusUI : MonoBehaviour
 
     private void UpdateText()
     {
+        NetworkManager nm = NetworkManager.Singleton;
+
         if (networkStatusText)
-            networkStatusText.text = $"Network: {(PhotonNetwork.IsConnected ? "✅ Connected" : "⏳ Connecting...")}";
+        {
+            string status;
+            if (nm == null) status = "⚠ No NetworkManager";
+            else if (nm.IsServer && nm.IsListening)
+                status = $"✅ Hosting ({SharedARNetworkManager.Instance?.LocalIp})";
+            else if (nm.IsConnectedClient) status = "✅ Connected (Client)";
+            else if (nm.IsClient) status = "⏳ Connecting...";
+            else status = "⏳ Offline (X = host, Y = join)";
+
+            networkStatusText.text = $"Network: {status}";
+        }
 
         if (anchorStatusText)
-            anchorStatusText.text  = $"Anchor: {(_anchorAligned ? "✅ Aligned" : "⏳ Waiting...")}";
+        {
+            string state = "⏳ Waiting for QR...";
+            if (alignmentManager != null && alignmentManager.IsAligned)
+                state = alignmentManager.IsLocked ? "✅ Aligned (locked)" : "✅ Aligned";
+            anchorStatusText.text = $"Anchor: {state}";
+        }
 
         if (playerCountText)
-            playerCountText.text   = $"Players: {PhotonNetwork.CurrentRoom?.PlayerCount ?? 0} / 2";
+        {
+            if (Time.time >= nextCountTime)
+            {
+                nextCountTime = Time.time + 0.5f;
+                playerCount = FindObjectsByType<NetworkedPlayerPose>(FindObjectsSortMode.None).Length;
+            }
+            playerCountText.text = $"Players: {playerCount} / 2";
+        }
     }
 
     private void FollowHead()

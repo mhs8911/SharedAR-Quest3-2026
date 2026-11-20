@@ -4,7 +4,12 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/SharedARMain.unity
+    guid: b2c26fa979d64ca4b8de6b565270f717
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 289c1b55c9541489481df5cc06664110, type: 3}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 22b125120cca66f4683c395e3b03b5e4, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: f27782e23240d344b9cb62063ff3f54c, type: 2}

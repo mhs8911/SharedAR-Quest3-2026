@@ -1,104 +1,155 @@
-// Scripts/Objects/SharedObjectSpawner.cs
-// Role: Either player can call SpawnSharedObject().
-//       The object is instantiated via Photon so it appears for both users
-//       at the midpoint between their two avatar head positions —
-//       all in shared-anchor world space.
-
-using Photon.Pun;
+// ============================================================================
+// Mariam code addition
+// File: Scripts/Objects/SharedObjectSpawner.cs
+// Changes from your version:
+//  [REMOVED] Update() polling, FindObjectOfType<QRCodeAnchorManager>() every frame,
+//            and the input checks. SpawnTrigger already handles input.
+//  [REMOVED] DetectPinch(): OVRHand.GetFingerPinched is not a static method.
+//  [CHANGED] spawn position is now in front of the requesting player's head,
+//            sent in MARKER space, so every device agrees on where it goes.
+//  [CHANGED] Clients can spawn too: the request goes to the server through
+//            PlayerCommands, and ServerSpawn() runs on the server.
+//  [ADDED]   SpawnSharedObject() / DespawnSharedObject() (no args), which are
+//            exactly what your SpawnTrigger already calls.
+//  [ADDED]   one shared object at a time; DontDestroyWithOwner so it survives
+//            the client that grabbed it leaving.
+// Plain MonoBehaviour in SharedARMain (NOT a NetworkObject).
+// ============================================================================
+using Unity.Netcode;
 using UnityEngine;
 
 public class SharedObjectSpawner : MonoBehaviour
 {
-    [Header("References")]
-    [SerializeField] private Transform localHead;            // OVRCameraRig centerEyeAnchor
-    [SerializeField] private string    sharedObjectPrefab = "SharedObject"; // must be in Resources/
+    public static SharedObjectSpawner Instance { get; private set; }
 
-    [Header("Spawn Settings")]
-    [SerializeField] private float spawnHeightOffset = 0f;  // adjust if needed
-    [SerializeField] private bool  requireAnchorAlignment = true;
+    [SerializeField] private GameObject sharedObjectPrefab;   // must have a NetworkObject
+    [SerializeField] private AlignmentManager alignmentManager;
+    [SerializeField] private Transform head;                  // CenterEyeAnchor (auto-found if empty)
+    [SerializeField] private float spawnDistance = 0.6f;
+[SerializeField] private bool useFixedSpawn = true;                 // Editor test toggle
+[SerializeField] private Vector3 fixedSharedSpawn = new Vector3(0f, 0f, 0.6f);
 
-    private bool _aligned = false;
-    private GameObject _spawnedObject;
+    private NetworkObject spawned;   // server only
 
-    private void Start()
+    private void Awake()
     {
-        if (localHead == null)
-        {
-            var rig = FindObjectOfType<OVRCameraRig>();
-            if (rig != null) localHead = rig.centerEyeAnchor;
-        }
-
-        SharedAnchorManager.Instance.OnAlignmentComplete += () =>
-        {
-            _aligned = true;
-            Debug.Log("[Spawner] Alignment complete — ready to spawn.");
-        };
+        Instance = this;
     }
 
-    /// <summary>
-    /// Call this from a button press, controller trigger, hand gesture, etc.
-    /// Computes the midpoint between both players' heads and spawns there.
-    /// </summary>
+    // ---- Called by SpawnTrigger on ANY device --------------------------------------
+
     public void SpawnSharedObject()
+{
+    Debug.Log("[Spawner] SpawnSharedObject called.");
+    if (!CanRequest()) return;
+
+    Vector3 sharedPos;
+    Quaternion sharedRot;
+
+    if (useFixedSpawn)
     {
-        if (requireAnchorAlignment && !_aligned)
+        sharedPos = fixedSharedSpawn;
+        sharedRot = Quaternion.identity;
+        Debug.Log($"[Spawner] Using fixed shared spawn {sharedPos}.");
+    }
+    else
+    {
+        Vector3 worldPos = head.position + head.forward * spawnDistance;
+        Quaternion worldRot = Quaternion.Euler(0f, head.eulerAngles.y, 0f);
+        sharedPos = alignmentManager.WorldToSharedPosition(worldPos);
+        sharedRot = alignmentManager.WorldToSharedRotation(worldRot);
+    }
+
+    PlayerCommands.Local.RequestSpawn(sharedPos, sharedRot);
+}
+
+    public void DespawnSharedObject()
+    {
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsListening) return;
+        if (PlayerCommands.Local == null) return;
+        PlayerCommands.Local.RequestDespawn();
+    }
+
+    // ---- Server side (called by PlayerCommands RPCs) -------------------------------
+
+public void ServerSpawn(Vector3 sharedPosition, Quaternion sharedRotation)
+{
+    Debug.Log($"[Spawner] ServerSpawn entered. IsServer={NetworkManager.Singleton.IsServer}, " +
+              $"spawnedNull={spawned == null}, spawnedIsSpawned={spawned != null && spawned.IsSpawned}, " +
+              $"aligned={alignmentManager != null && alignmentManager.IsAligned}");
+
+    if (!NetworkManager.Singleton.IsServer)
+    {
+        Debug.LogWarning("[Spawner] ServerSpawn exit: not server.");
+        return;
+    }
+    if (spawned != null && spawned.IsSpawned)
+    {
+        Debug.LogWarning("[Spawner] ServerSpawn exit: a shared object already exists. Press D to despawn first.");
+        return;
+    }
+
+        Vector3 worldPos = alignmentManager.SharedToWorldPosition(sharedPosition);
+        Quaternion worldRot = alignmentManager.SharedToWorldRotation(sharedRotation);
+
+        GameObject obj = Instantiate(sharedObjectPrefab, worldPos, worldRot);
+        NetworkObject netObj = obj.GetComponent<NetworkObject>();
+        if (netObj == null)
         {
-            Debug.LogWarning("[Spawner] Cannot spawn — coordinate spaces not yet aligned.");
+            Debug.LogError("[Spawner] SharedObject prefab has no NetworkObject.");
+            Destroy(obj);
             return;
         }
 
-        Vector3 spawnPos = GetMidpointBetweenPlayers();
-        spawnPos.y      += spawnHeightOffset;
+        netObj.DontDestroyWithOwner = true;
+        netObj.Spawn();
+        spawned = netObj;
 
-        // Face the spawned object toward the local player
-        Vector3    lookDir  = localHead.position - spawnPos;
-        lookDir.y           = 0;
-        Quaternion spawnRot = lookDir != Vector3.zero
-            ? Quaternion.LookRotation(lookDir)
-            : Quaternion.identity;
-
-        // PhotonNetwork.Instantiate syncs this across all clients automatically
-        _spawnedObject = PhotonNetwork.Instantiate(
-            sharedObjectPrefab,
-            spawnPos,
-            spawnRot
-        );
-
-        Debug.Log($"[Spawner] Shared object spawned at {spawnPos}");
+        Debug.Log($"Shared object spawned at shared {sharedPosition} (world {worldPos})");
     }
 
-    /// <summary>Destroy the shared object for all players.</summary>
-    public void DespawnSharedObject()
+    public void ServerDespawn()
     {
-        if (_spawnedObject != null && _spawnedObject.GetComponent<PhotonView>().IsMine)
-            PhotonNetwork.Destroy(_spawnedObject);
+        if (!NetworkManager.Singleton.IsServer) return;
+        if (spawned != null && spawned.IsSpawned)
+            spawned.Despawn(true);
+        spawned = null;
     }
 
-    // ── Midpoint Calculation ─────────────────────────────────────────────────
+    // ---- Helpers -------------------------------------------------------------------
 
-    private Vector3 GetMidpointBetweenPlayers()
+private bool CanRequest()
+{
+    if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsListening)
     {
-        Vector3 localPos  = localHead ? localHead.position : Vector3.zero;
-        Vector3 remotePos = GetRemotePlayerHeadPosition();
-        return (localPos + remotePos) * 0.5f;
+        Debug.LogWarning("[Spawner] Not connected yet.");
+        return false;
     }
-
-    private Vector3 GetRemotePlayerHeadPosition()
+    if (alignmentManager == null)
     {
-        // Find all PlayerAvatarSync in scene — the one not ours is the remote player
-        var syncs = FindObjectsOfType<PlayerAvatarSync>();
-        foreach (var sync in syncs)
-        {
-            if (!sync.photonView.IsMine)
-            {
-                // The head visual transform represents the remote player's head
-                Transform headVisual = sync.transform.Find("HeadVisual");
-                if (headVisual != null) return headVisual.position;
-            }
-        }
-
-        // Fallback: spawn 1.5m in front of local player if remote pos unknown
-        Debug.LogWarning("[Spawner] Remote player position unknown — spawning in front of local.");
-        return localHead.position + localHead.forward * 1.5f;
+        Debug.LogError("[Spawner] alignmentManager is not assigned in the Inspector.");
+        return false;
     }
+    if (!alignmentManager.IsAligned)
+    {
+        Debug.LogWarning("[Spawner] Request dropped: this device is not aligned.");
+        return false;
+    }
+    if (PlayerCommands.Local == null)
+    {
+        Debug.LogError("[Spawner] Request dropped: PlayerCommands.Local is null.");
+        return false;
+    }
+    if (head == null)
+    {
+        OVRCameraRig rig = FindFirstObjectByType<OVRCameraRig>();
+        if (rig != null) head = rig.centerEyeAnchor;
+    }
+    if (head == null)
+    {
+        Debug.LogError("[Spawner] Request dropped: no head transform found.");
+        return false;
+    }
+    return true;
+}
 }

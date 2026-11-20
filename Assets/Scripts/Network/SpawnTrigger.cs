@@ -1,8 +1,10 @@
-// Scripts/Objects/SpawnTrigger.cs
-// Role: A thin input bridge. Listens for controller button presses
-//       or hand pinch gestures and calls SharedObjectSpawner.
-//       Attach to any active GameObject in SharedARMain.unity.
-
+// ============================================================================
+// Mariam code addition
+// File: Scripts/Network/SpawnTrigger.cs
+// NO CODE CHANGES. It already calls spawner.SpawnSharedObject() and
+// spawner.DespawnSharedObject(), which the rewritten SharedObjectSpawner provides
+// (and which now work from either headset).
+// ============================================================================
 using UnityEngine;
 using UnityEngine.InputSystem;   // requires com.unity.inputsystem
 
